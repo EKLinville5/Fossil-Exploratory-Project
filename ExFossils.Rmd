@@ -1,0 +1,950 @@
+---
+title: "PaleoProj"
+author: "Elizabeth Linville"
+date: "2/13/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Section I: Data Description
+
+This data set is derived from the online open database for fossil occurances from https://paleobiodb.org/#/, also known as the PaleoBiology Database.
+
+This is a public, online database that is maintained by an international group of paleontologists. This particular database focuses on the occurances of organisms that are clasified as ORDER: CARNIVORA. There are over 11,000 cases in the data set and 29 variables. This is a scaled down version of what is available online, as you can choose the parameters and criteria for the data that is to be downloaded. The downloaded .csv file that is being used for this project was downloaded on Wednesday, February 12, 2020 with the most updated information from the database.
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(readr)
+```
+
+
+```{r}
+paleodat <- read_csv("./Raw Data/pbdb_data_occurances.csv")
+```
+```{r}
+paleodat
+```
+The data is effectively pulled up, even though there are a lot of parsing issues.
+
+```{r}
+str(paleodat)
+```
+
+Variable Description 
+
+VARIABLES:
+occurence_no    <int>     The ID number given to the fossil
+collection_no   <int>     The identifier of the collection with which the occurance is associated
+identified_name <chr>     The taxonomic identification given to the specimen in the field
+identified_rank <chr>     The taxonomic rank of the specimen
+accepted_name   <chr>     The taxonomic identification that is currently accepted based on evidence
+early_interval  <chr>     The specific geologic time range associated with this occurrence (not necessarily a   standard interval), or the interval that begins the range if late_interval is also given
+late_interval   <chr>     The interval that ends the specific geologic time range associated with this occurrence, if different from the value of early_interval
+max_ma          <int>     The early bound of the geologic time range associated with this occurrence (in Ma)
+min_ma          <int>     The late bound of the geologic time range associated with this occurrence (in Ma)
+reference_no    <int>     The identifier of the reference from which this data was entered
+phylum          <chr>     The name of the phylum in which this occurrence is classified.
+class           <chr>     The name of the class in which this occurrence is classified.
+order           <chr>     The name of the order in which this occurrence is classified.
+family          <chr>     The name of the family in which this occurrence is classified.
+genus           <chr>     The name of the genus in which this occurrence is classified.
+abund_value     <int>     The abundance of this occurrence within its containing collection
+abund_unit      <chr>     The unit in which this abundance is expressed
+taxon_environment <chr>   The general environment or environments in which this life form is found
+diet            <chr>     The general diet or feeding mode of this organism
+composition     <chr>     The composition of the skeletal parts of this organism
+lng             <int>     The longitude at which the occurrence was found (in degrees)
+lat             <int>     The latitude at which the occurence was found (in degrees)
+cc              <chr>     The country in which the collection is located
+state           <chr>     The state or province in which the collection is located, if known
+country         <chr>     The country in which the collection is located, if known
+latlng_basis    <chr>     how the lat/long information was determined
+latlng_precision <chr>    how the precise measurement was recorded
+geogscale       <chr>     rock strata that occurance was found in
+geocomments     <chr>     additional comments about the locality of the occurance
+
+Continuous variables = max_ma, min_ma, lat and lng
+Discrete that will be used in analysis = family, genus, species, early_interval, late_interval, Epoch, Period, composition, diet
+
+Potentially will also use collection and occurance identification numbers, as well as accepted name
+
+```{r}
+paleodat
+```
+
+Questions:
+
+1. How does the distribution of four main Carnivoran families (Canidae, Hyaenidae, Felidae, and Ursidae) change over time?
+2. Are the populations directly or inversely proportional to one another?
+3. Does the geographic range change for each family individually over time and why? 
+4. Were potential competition rates an influence in the distribution of these families?
+5. Is one family more represented in the fossil record than others?
+6. Which family has the most extinct biodiversity according to the fossil record?
+7. Where, geographically, were there potential interactions between members of these four families?
+8. How can the interaction and geographic distribution of these organisms give information for today's declining biodiversity?
+
+
+------------------------------------------------------------------------------------------------------------------
+
+##Section II: Data Cleaning and Manipulation
+Now to remove the variables that will not be used in the analysis:
+
+```{r}
+paleodat <- paleodat %>%
+  dplyr::select(-geogcomments) %>%
+  dplyr::select(-geogscale) %>%
+  dplyr::select(-latlng_precision)
+str(paleodat)
+```
+```{r}
+paleodat <- paleodat %>%
+  select(-latlng_basis) %>%
+  select(-county) %>%
+  select(-state) %>%
+  select(-cc) %>%
+  select(-taxon_environment) %>%
+  select(-class) %>%
+  select(-phylum) %>%
+  select(-identified_rank) %>%
+  select(-identified_name)
+str(paleodat)
+```
+
+Checking to make sure they have been removed from the data set:
+```{r}
+paleodat
+```
+
+removing the rest...
+```{r}
+paleodat <- paleodat %>%
+  select(-reference_no) %>%
+  select(-abund_value) %>%
+  select(-composition)
+
+paleodat
+```
+
+Begin to make new variables. 
+A new variable will be created that clusters specimens into wider groups, specifically based on the epochs of the Cenozoic. This will help group the data and standardize all of the fossils into set parameters, instead of varied time periods. These epochs will then be assigned numbers when grouped again into their corresponding systems/periods.
+Reference used for time period distinctions:
+https://www.researchgate.net/figure/The-Cenozoic-part-of-the-International-Chronostratigraphic-Chart-modified-from-Cohen-et_fig1_315719652
+
+```{r}
+time_period_matrix <- select(paleodat, "early_interval", "late_interval", "max_ma", "min_ma")
+time_period_matrix
+```
+
+```{r}
+arrange(time_period_matrix, desc(max_ma))
+```
+
+In the table above, the max_ma was sorted into a descending order, so that I can see what the earliest time period that is represented in this data set.
+
+```{r}
+arrange(time_period_matrix, max_ma)
+```
+
+```{r}
+paleodat %>%
+count(max_ma)
+```
+
+Next step: Mutate and make new variable for "Epochs" back in the original paleodat dataset
+
+New Variable "Epoch" will use the following cut-offs to reassign specimens based on the early_interval varials:
+Holocene: 0 - 11,700 years (886 entries)
+Pleistocene: 11,700 - 2.58 mya (3879 entries)
+Pliocene: 2.58 - 5.33 mya (1613 entries)
+Miocene: 5.33 - 23.03 mya (3832 entries)
+Oligocene: 23.03 - 33.9 mya (962 entries)
+Eocene: 33.9 - 56.0 mya  (604 entries)
+Paleocene: 56.0 - 66.0 mya (19 entries)
+
+```{r}
+count(paleodat, max_ma <= 0.0117)
+```
+```{r}
+paleodat %>%
+count(max_ma > 0.0117 & max_ma <= 2.588)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 2.588 & max_ma <= 5.333)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 5.333 & max_ma <= 23.03)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 23.03 & max_ma <= 33.9)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 33.9 & max_ma <= 56.0)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 56.0 & max_ma <= 66.0)
+```
+
+Now that the number of specimens is clear in each category, a new variable can be created.
+
+```{r}
+paleodat <- paleodat %>% 
+  mutate(Epoch = case_when(max_ma <= 0.0117 ~ 'Holocene',
+                           (max_ma > 0.0117 & max_ma <= 2.588) ~ 'Pleistocene',
+                           (max_ma > 2.588 & max_ma <= 5.333) ~ 'Pliocene',
+                           (max_ma > 5.333 & max_ma <= 23.03) ~ 'Miocene',
+                           (max_ma > 23.03 & max_ma <= 33.9) ~ 'Oligocene',
+                           (max_ma > 33.9 & max_ma <= 56.0) ~ 'Eocene',
+                           (max_ma > 56.0 & max_ma <= 66.0) ~ 'Paleocene'))
+
+```
+
+```{r}
+paleodat
+```
+
+```{r}
+paleodat %>%
+count(Epoch)
+```
+The above call verifies the original count numbers, which means all variables were properly assigned to the new category.
+
+```{r}
+ggplot(paleodat)+geom_bar(aes(x=Epoch), fill = "sienna2") + 
+  labs(title = "Number of Specimens in Each Epoch", 
+       x = "Epoch", y = "Number of Specimens")
+```
+Highest concentration of fossils are found from the Pleistocene and Miocene epochs, respectfully.
+
+Next variable that will be created: A number-based categorical variable will be created that again groups each of the epochs into three periods. Period "1" will be the "Paleogene" Period "2" will be the "Neogene" and Period "3" will be the "Quaternary"
+
+Paleogene (1) : 23.03 - 66.0 mya 1585 entries
+Neogene (2) : 2.58 - 23.03 mya 5445 entries
+Quarternary (3) : 0 - 2.58 mya 4765 entries
+
+```{r}
+paleodat %>%
+count(max_ma > 23.03 & max_ma <= 66.0)
+```
+
+```{r}
+paleodat %>%
+count(max_ma > 2.588 & max_ma <= 23.03)
+```
+
+```{r}
+count(paleodat, max_ma <= 2.588)
+```
+
+Now that the counts are done, a new variable "Period" will be created
+```{r}
+paleodat <- paleodat %>% 
+  mutate(Period = case_when(max_ma <= 2.588 ~ '3',
+                           (max_ma > 2.588 & max_ma <= 23.03) ~ '2',
+                           (max_ma > 23.03 & max_ma <= 66.0) ~ '1'))
+paleodat
+                        
+```
+
+```{r}
+paleodat %>%
+count(Period)
+```
+
+```{r}
+ggplot(paleodat)+geom_bar(aes(x=Period))
+```
+
+
+All entries have been properly assigned into a period.
+```{r}
+ggplot(paleodat)+geom_bar(aes(x=family))
+```
+
+
+Finally, I am going to cut down the number of Carnivoran families that are represented. This is for two reasons: it will help streamline the data and it will help me focus on the specific questions that I have about this data. The families that will be included:
+
+Canidae - Dogs
+Hyaenidae - Hyenas
+Ursidae - Bears
+Felidae - Cats
+
+I choose these four families because they tend to hold organisms that are in the key predatory roles in their environment. This makes them potential keystone species, indicating biodiversity and health of the ecosystem in which they lived. This is also an exntension of my graduate thesis, which focused on these groups of Carnivorans and their diets.
+
+```{r}
+paleodatFam <- paleodat %>% filter(family == "Canidae" | family == "Hyaenidae" | family == "Felidae" | family == "Ursidae") 
+paleodatFam
+```
+```{r}
+summary(paleodatFam)
+```
+
+```{r}
+paleodatFam %>%
+  count(family)
+```
+There will be 6,431 specimens included in this exploration study.
+
+------------------------------------------------------------------------------------------------------------------
+
+###Section III: Graphing Variables and Analysis
+
+Variable: Family
+
+```{r}
+temp <- ggplot(paleodatFam)
+temp + geom_bar(aes(x=family), fill = "steelblue4") + 
+  labs(title = "Represented Families in Paleo Study", 
+       x = "Family Name", y = "Number of Specimens")
+
+```
+
+According to the graph and earlier count, the Canidae family is the most represented in this data set, with the Hyena family being the least represented fossils in this set. This graph is important in that it also shows us that there are no errors and no missing values.
+
+```{r}
+paleodatFam %>%
+  count(family) %>%
+  mutate(PercentFamily = n/sum(n)*100)
+```
+
+According to both the statistics and the graph, the Canidae family has the greatest representation of occurances with almost 50% of specimens. The felids come in second with 28.42%, while the Hyaenidae and Ursidae come in significantly behind. Later on, I may try to find similar ratios from other research papers to try to determine why the incidences of those two families are so low. This may be a refleciton of population dynamics. It is also important to note that the Hyaenidae family did not evolve until the Neogene, so their overall lower numbers may be a representation of this fact. You would expect though, a greater diversification in the time that they were present - were competition levels an issue?
+
+```{r}
+temp + geom_bar(aes(x = Epoch), fill = "cyan4")+
+  labs(title = "Number of Specimens in Each Epoch", x = "Epoch", y = "Number of Specimens")
+```
+
+As previosly stated, the epochs that are most represented include the Pleistocene and Miocene, respectively. This is not surprising because these are the two most recent epochs prior to the end of the Ice Age, and this is when these families experienced significant diversification. The low representation in the Holocene is also not surprising because there was a large extinction event of megafauna at the Holocene/Pleistocene boundary. Many members of these families went extinct in the Pleistocene.
+
+```{r}
+paleodatFam %>%
+  count(Epoch) %>%
+  mutate(PercentofTotal = n/sum(n)*100)
+  
+```
+
+According to the above stats, the Pleistocene has the greatest number of specimens with 40.24% of the total counted specimens. Second is the Miocene with 31.31% of specimens. Together, these to time periods make up majority of fossil record in this study.
+
+Epoch and Family plotted together
+
+```{r}
+temp + geom_bar(aes(x = family, fill = Epoch), color = "Black")+
+  labs(title = "Number of Specimens from Four Families in Each Epoch", x = "Family", y = "Number of Specimens")
+```
+
+This visualization demonstrates how each family is represented differently based on the time period. The Canid family has representation in each epoch, whereas the felids are in 4 of the epochs. The Hyaenidae have the least diversity when it comes to the time periods, which again supports the interesting finds from the analysis up above. The Ursids, although lowly represented overall, seem to at least be found in all of the time periods.
+
+```{r}
+paleodatFam$Epoch <- factor(paleodatFam$Epoch, levels = c("Holocene", "Pleistocene", "Pliocene", "Miocene", "Oligocene", "Eocene"))
+```
+
+```{r}
+str(paleodatFam)
+```
+
+```{r}
+legend_ord <- c("Holocene", "Pleistocene", "Pliocene", "Miocene", "Oligocene", "Eocene")
+paleodatFam <- arrange(paleodatFam, Epoch)
+```
+
+
+```{r}
+temp + geom_bar(aes(x = family, fill = Epoch, order = Epoch), color = "Black")+
+  scale_fill_discrete(breaks = legend_ord)+
+  labs(title = "Number of Specimens from Four Families in Each Epoch", x = "Family", y = "Number of Specimens")
+```
+
+```{r}
+ggplot(paleodatFam, aes(x=family, y=reorder(family, Epoch), fill = Epoch), color = "Black") +
+    geom_bar(stat = "identity")
+```
+
+```{r}
+ggplot(paleodatFam, aes(x=reorder(family, Epoch), fill = Epoch), color = "Black") +
+    geom_bar()+
+   labs(title = "Number of Specimens from Four Families in Each Epoch", x = "Family", y = "Number of Specimens")
+```
+
+```{r}
+library(RColorBrewer)
+```
+
+
+```{r}
+ggplot(paleodatFam, aes(x=reorder(family, Epoch), fill = Epoch), color = "Black") +
+    geom_bar()+
+   labs(title = "Number of Specimens from Four Families in Each Epoch", x = "Family", y = "Number of Specimens")+
+  scale_fill_brewer(palette = "Dark2")
+```
+
+
+```{r}
+temp + geom_histogram(aes(x = max_ma), fill = "darkslategray4", binwidth = 5)+
+  labs(title = "Number of Specimens Found by Date (millions of years (mya))", x = "Millions of Years", y = "Number of Specimens")
+```
+
+The above illustration shows that most of the specimens date to more recent times than ones deeper in geologic history. This is again a reflection that the diversification of mammals, particularly these families, did not really occur until closer to the Neogene. Only Canids can be claimed to have diversified well throughout the Paleogene, with felids also beginning to show some diversity during this time.
+
+```{r}
+temp + geom_boxplot(aes(x = family, y = max_ma, fill = family), alpha = 0.5)+
+  labs(title = "Boxplot of Families and Specimen Age in Millions of Years", x = "Family", y = "Age in Millions of Years")
+```
+
+The above boxplot shows the overall median ages of each family. Again, the graph supporting the notion that Canids have had the most time to diversify. The Felidae plot is interesting. It is more condensed than I would have expected based on the raw data, but this may be because of the "outliers" for this group. 
+
+```{r}
+temp + geom_bar(aes(x = Period), fill = "darkorchid4")+
+  labs(title = "Number of Specimens in Each Period", x = "Period", y = "Number of Specimens")
+```
+
+```{r}
+paleodatFam %>%
+  count(Period) %>%
+  mutate(PercentPeriod = n/sum(n)*100)
+```
+
+According to the graph and the statistics, the least represented period is the Paleogene with under 10% of fossil representation. This is the oldest of the periods, and may be due to several factors which will be explored in a future analysis. 
+
+```{r}
+quantstats <- paleodatFam %>%
+  group_by(family) %>%
+  summarize(lab=mean(max_ma))
+
+ggplot(paleodatFam, aes(x = family, y = max_ma))+
+  geom_point(alpha= 0.25)+
+  geom_label(data = quantstats, aes(label = lab, y = Inf), vjust = 1)
+```
+
+The above graph show the concentration of distribution for each family based on the max_ma quantative variable. The overall mean of age is shown in the boxes above.
+
+```{r}
+#temp+ geom_label(aes(x = Period, y = max_ma, label = family))
+```
+
+
+```{r}
+#temp+ geom_violin(aes(x = Period, y = max_ma))
+```
+
+
+```{r}
+temp+ geom_bar(aes(x = family, fill= Period), position = "dodge")+
+  labs(title = "Number of Specimes from Each Family Sorted by Period", x = "Family", y = "Numbre of Specimens")
+```
+Again, the overall low incidence overall of Hyenas and Bears may be due to the time range in which these families first appear in the fossil record. I still want to explore the possibility of high competition rates from the more diverse canids and felids potentially having an impact of keeping the overall diversity of hyenas and bears low representation during the Neogene and Quarternary time periods. Is this a similar percentage/ratio to modern population numbers where these animals coexist?
+
+
+```{r}
+temp + geom_bar(aes(x = family, fill = Epoch), color = "Black")+
+  facet_wrap(~Period)+
+  labs(title = "Number of Specimens from Four Families in Each Epoch and Period", x = "Family", y = "Number of Specimens")
+```
+Number of specimens from each family broken out by epoch and time period.
+
+Individual genus plots per family - still a work in progress!
+
+```{r}
+temp+ geom_bar(aes(x = genus))+facet_wrap(~family)
+```
+
+This is a graph that needs work. I would like to plot each genus and how well it is represented in the fossil record for each family. There are obviously too many to make this graph legible. I have been able to get it to graph in other programs (Tablaeu), and was able to get a ratio in the table below.
+
+
+```{r}
+paleodatFam %>%
+  count(genus, family) %>%
+  mutate(PercentofTotal = n/sum(n)*100)
+```
+
+
+```{r}
+paleodatFam %>%
+  filter(family == "Felidae") %>%
+  select(genus)
+```
+
+
+```{r}
+FelidGenus <- paleodatFam %>%
+  filter(family == "Felidae") %>%
+  select(genus)
+```
+
+
+```{r}
+count(FelidGenus)
+```
+
+
+Goal - how many genus' are represented in each family - make seperate graphs?
+
+
+```{r}
+temp+ geom_count(aes(x = family, y = genus))
+  
+```
+
+```{r}
+paleodat %>%
+  count(family, genus) %>%
+  ggplot(aes(x = family, y = genus))+
+  geom_tile(aes (fill = n))
+```
+
+In the above work, I am trying to plot just each individual family and the represented genus'. I can't seem to figure out an appropriate way to do this.  I am leaving in all of my attemps so you can see what I have tried.
+
+Map Attempts
+
+```{r}
+library(sp)
+```
+
+
+```{r}
+paleoMap <- paleodatFam %>%
+  select(lat, lng)
+paleoMap
+```
+
+```{r}
+#install.packages("lubridate")
+```
+```{r}
+#install.packages("ggmap")
+```
+
+```{r}
+library(ggmap)
+```
+
+
+```{r}
+ggmap::register_google(key = "insert API key here")
+```
+
+
+```{r}
+p <- get_googlemap(center = c(lon = 30, lat = 0),
+                    zoom = 1, scale = 1,
+                    size = c(640,640),
+                    maptype ='terrain',
+                    color = 'color')
+```
+
+```{r}
+map <- ggmap(p)
+map
+```
+
+
+
+
+```{r}
+map+ geom_point(aes(x = lng, y = lat, color = family), data = paleodatFam, size = 1, shape= 1, alpha = 0.5)
+```
+
+
+```{r}
+q <- get_map(c(left = -180, bottom =-60, right = 180, top = 70), scale =2)
+```
+
+```{r}
+ggmap(q)
+```
+
+```{r}
+ggmap(q)+ geom_point(aes(x = lng, y = lat, color = family), data = paleodatFam, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Specimens by Family", x = "Latitude", y = "Longitude")
+```
+
+Attempt #3
+```{r}
+world <- map_data("world")
+head(world)
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatFam, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Specimens by Family", x = "Latitude", y = "Longitude")
+```
+
+I think the third map is the most successful visualization of the data. Distribution of each group seems focused primarily in North America, Europe, and some in Asia, Africa, and South America. Ursid species seem to have ranges in more northern reaches, whereas canids and felids are more widspread. Hyenas seem ot be absent form North America and South America, focusing mainly in Europe and the Asian continents. Surprisingly, not many ancestral hyenas are found in Africa, which is the only continent were modern hyenas have ranges.
+
+Next steps:
+Plot only specific continents - maybe focus on NA and Europe, Asia
+Plot only one family with each genus represented?
+
+
+------------------------------------------------------------------------------------------------------------------
+
+####Reflection Part I
+
+Overall, I think the data has raised some interesting questions, as well as answering some as well. Canids are the most represented in the fossil record (question number 5). Geographically, the fossil organisms share similar ranges, but more data is needed to determine the time periods in which some of these organisms may have coexisted. Hyenas seem to have the smallest spcimen numbers, the smallest amoutn of time present, and the smallest range out of the represented data. The hyenas are still proving to be the most interesting, with some more quesitons being generated by the data than have been answered.
+
+Some of the aspects of this project were very challenging. It took me over a week to figure out how to get the maps, and I tried multiple methods. The data is still not as clean as I would like on this plot, but I am not sure how to isolate specfic families to plot, and then show how these change over time. Would that require an animated graph? Then I would need to figure out how to plot the families in specific periods only, so I can see what kind of interaction was potentially occuring. This would help answer some remaining questions. I still also need to figure out how to get counts of how many specimens are being classified into each genus, then plot these numbers against max_ma, epoch, and period. I also want to run some additional ratios to determine how each family stacks up with one another.
+
+Moving forward, I have begun to look into some population statistics for the second part of the project. I know my data is somewhat unique, in that I don't have a lot of quantative variables, but I do believe there are things to be uncovered with this data set. I would also like to potentially model, based on the representations of each specimen, potential population densities during each epoch for each family.
+
+
+------------------------------------------------------------------------------------------------------------------
+#####Project Part 2
+
+In this first section, I am going to try to improve upon my earlier attempts to understand the relationship of the different genera for each family. I will attepmt this by using the group_by function as well as other functions covered in the tidyr package
+
+Just to reiterate the distribution of each family:
+```{r}
+ratios_fam <- paleodatFam %>%
+  count(family) %>%
+  mutate(PercentFamily = n/sum(n)*100)
+
+ratios_fam
+```
+
+```{r}
+paleodatFam %>%
+  filter(family == "Felidae") %>%
+  select(genus)
+```
+I decided to build a function that I can use with each family to figure out the distribution of the genus'.
+
+```{r}
+genus_count <- function(data, family_name) {
+  filter_data <- filter(data, family == family_name)
+  return (data %>% filter(family == family_name & !is.na(genus)) %>%
+            group_by(genus) %>%
+            count(genus))
+}
+```
+
+
+```{r}
+genus_count(paleodatFam, "Canidae")
+```
+
+Now to adjust the function so it calculates the ratios of each taxa...
+```{r}
+genus_count_ratio <- function(data, family_name) {
+  filter_data <- data %>% filter(family == family_name & !is.na(genus))
+  
+  total_count <- count(filter_data)
+  
+  return (filter_data %>% group_by(genus) %>%
+         count(genus) %>%
+         mutate(PercentGenus = (n/sum(total_count))*100)) %>%
+          arrange(desc(PercentGenus))
+  
+}
+```
+
+In the below matrices, each Family is broken down into the represented genus', and further organized by the Percentage of each genus. 
+
+
+```{r}
+genus_count_ratio(paleodatFam, "Canidae")
+```
+
+For the dog family, the most represented genus is the "Canis" family, which includes the gray wolf, red wolf, and coyote. These are modern species that are also represented in the fossil record. In addition, the Dire wolf (Canis dirus) is an extinct member of htis genus that is also found within the data, as well as some other extinct species of jackals. After that, the Fox group has the next highest representation, followed by many large, extinct ecomorphs of dogs. The Hesperocyon, Aelurodon, Epicyon, and Borophagine dogs were common species that existed during the Miocene Epoch. Interestingly, the African Hunting Dog (Lycaon) is not well represented in this fossil collection, even though it diverged much earlier in time than the Canis genus, and still exists today in Africa.
+
+```{r}
+genus_count_ratio(paleodatFam, "Felidae")
+```
+
+In the Felid family, the three most represented genus' include the most common ones found today, including Panthera (tigers, lions, leopards, jaguars, and extinct relatives), Lynx (bobcats and lynx, including an extinct lynx that was common across Europe during the Pleistocene), and the Felis genus, which includes smaller wild cat species and the mountain lion. Following these extant lineages are common extinct genus', including three groups of sabre-toothed cats. 
+
+```{r}
+genus_count_ratio(paleodatFam, "Ursidae")
+```
+
+For the bears, 50% of the specimens are identified as "Urus", which includes the brown bears, black bears, polar bears, and one extinct species of cave bear. Second is the Arctodus genus, which includes the extinct Giant Short Faced Bear, who was common across North America and Europe during the Pleistocene. Other modern species of bear are poorly represented, likely because their habitats due not support fossilization as well.
+
+```{r}
+genus_count_ratio(paleodatFam, "Hyaenidae")
+```
+
+The modern spotted Hyena, Crocuta crocuta, was well represented in the data. Although the spotted hyena is the only living representative of this genus, there was once a great diversity within this group. Many larger hyenas fell within this genus during the Pleistocene, all of which are extinct. Second, with 15%, is the Hyaena genus, which includes the modern Striped and Brown hyenas. Pachycrocuta was a very large cave hyena that also existed during the Pleistocene and is common in European fossil deposits. 
+
+Based on the information provided above, it would be useful to plot the four species on a map, broken down by the time periods, so that interactions could better be understood. First, I will plot the two most populated Epochs, the Pleistocene and the Miocene, then I will plot two of the more under-represented time periods. Ultimately, an animated map that shows these changes as time continues would be ideal, but likely beyond the scope of time for this project.
+
+```{r}
+paleodatPleist <- filter(paleodatFam, Epoch == "Pleistocene")
+paleodatPleist
+```
+
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatPleist, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Pleistocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+Based on the above map, it is clear that Canids, Felids, and Ursids had the most overlap in North America and Europe, with Hyenas only overlapping some in Europe, Southern Asia, and parts of Africa. This indicates that more global populations and interactions occured between the other three families during this time, likely with many of the different species interacting and cohabitating on various continents. This map also has the highest number of specimens represented because, arguably, it has the highest number of genus diversity for these families.
+
+
+```{r}
+paleodatMio <- filter(paleodatFam, Epoch == "Miocene")
+paleodatMio
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatMio, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Miocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+The above map highlights only the Miocene epoch, which has an interesting pattern. The Canidae are isolated almost entirely to North America, a much different pattern than what is shown in the more recent Pleistocene epoch. The Borophagine dogs were the most common group during this time, primarily found in North America, which is supported by this fossil sample. In North America, Canids were mainly interacting with bears, as very few felid fossils are being represented. A different story occurs in Europe and Africa, where Hyenas and Felids have the largest interactions.
+
+
+```{r}
+paleodatPlio <- filter(paleodatFam, Epoch == "Pliocene")
+paleodatPlio
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatPlio, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Pliocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+As we continue deeper in time, fewer fossils are being represented on the map. Now, Canids and Felids seem to be interacting more frequently in North America, with the only known North American hyena and a few bears. Bears and Hyenas seem to be focused mostly in Europe and Asia.
+
+```{r}
+paleodatOli <- filter(paleodatFam, Epoch == "Oligocene")
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatOli, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Oligocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+
+The Oligocene, roughly 25 million years ago, shows a completely different pattern. Again, Canids seem more prolific in North America, whereas bears are more common in Europe and the Eurasian continent. Hyenas are absent here, as they have not yet diverged into their own family during this time. Felids are lowly represented as well, for similar reasons as the hyenas, in that they are a relatively new group and have not yet experienced their diversification event.
+
+```{r}
+paleodatEoc <- filter(paleodatFam, Epoch == "Eocene")
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatEoc, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Eocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+Going back one more epoch, and you can see that Hyenas again are absent but now Felids are as well. Only small clusters of bears and canids are represented, which can lend some interesting patterns about the appearance of these lineages in the fossil record.
+
+Map Reflection:
+The biggest take away from the different maps is the distribution patterns. In the earliest map of the Eocene, the only represented families (bears and dogs) are not globally distributed, rather they appear in small clusters in North America and Europe, with a small population of dogs in China. As time progresses to the Oligocene, you see a more diversified distribution of bears and dogs, but felids, who make their first appearance during this epoch, again seem to have only small, local populations. This trend continues with hyenas, until eventually there is a global distribution and more diversification of each family through to the Pleistocene.
+
+------------------------------------------------------------------------------------------------------------------
+######Statistical Modeling of Data
+
+When I first started this project, I knew I wanted to use a model to estimate the real population numbers based on the fossil specimens. Not all animals become a fossil, so what we find in the fossil records are just snippets or small representations of the population that actually existed. Having a more accurate estimation of the real population sizes of extinct species can give more understanding to environmental and ecological relationships that were occuring. I also knew I wanted to use some ecology-based statistics to better understand the relationship between these families. I found a couple of paper that already did this, and tried to work through the functions and the code that they provided in their supplemental portions, but it was very difficult. After some more research, I found a package that contains all of the stats that can be used in this instance, so that is what I am going to try to use on my data. Lucky for me, this package was just released on March 23 of this year, so it is great timing! I will use the functions in this package to model the species richness and diversity during the time that this project covers.
+
+package information: https://cran.r-project.org/web/packages/fossil/fossil.pdf
+
+```{r}
+#install.packages("fossil")
+```
+
+
+```{r}
+library(fossil)
+```
+
+Abundance and Incidence Based Coverage Estimators
+
+ACE and ICE functions take argument "x" as a vector, where all taxa must be unique on each row (taxa.row=true). The value representing a minimum number of species present in the assemblage if the entire population were to be censused will be returned.
+
+I again will write a function that will allow me to calculcate the ACE ratio easily for each family. First, the function will isolate the data into a two-columned matrix, as this will be the easiest way to pull the "n" category into a vector form.
+
+Canids
+```{r}
+ACE_ratio <- function(data, family_name) {
+  filter_data <- data %>% filter(family == family_name & !is.na(genus))
+  
+  total_count <- count(filter_data)
+  
+  return (filter_data %>% group_by(genus) %>%
+         count(genus))
+}
+```
+
+```{r}
+Canid_stats <- ACE_ratio(paleodatFam, "Canidae")
+Canid_stats
+```
+
+Now that I have my table, I can pull the count (n) column out and turn it into a vector
+```{r}
+vect_can <- Canid_stats$n
+vect_can
+```
+
+Finally, I can plug the above information into the model.
+```{r}
+ACE(vect_can, taxa.row = TRUE)
+```
+
+For the canids, the ACE returned "60", which indicates that there should be at least 60 unique genera represented in the sample. This is actually accurate with what is given in the data, so one could tentatively make the assumption that the fossil data for this family is a good representation of the species richness over time. I will now repeat the same steps for the remaining families:
+
+Felids
+```{r}
+Felid_stats <- ACE_ratio(paleodatFam, "Felidae")
+Felid_stats
+```
+
+```{r}
+vect_fel <- Felid_stats$n
+vect_fel
+```
+
+```{r}
+ACE(vect_fel, taxa.row = TRUE)
+```
+The ACE estimates that there should be 46 unique representations of genera, though there are only 40 in the data set. This indicates that the fossil record is underrepresenting the potential diversity of this family over time.
+
+Ursidae
+```{r}
+Ursid_stats <- ACE_ratio(paleodatFam, "Ursidae")
+Ursid_stats
+```
+
+```{r}
+vect_urs <- Ursid_stats$n
+```
+
+```{r}
+ACE(vect_urs, taxa.row= TRUE)
+```
+
+Hyenas
+```{r}
+Hyen_stats <- ACE_ratio(paleodatFam, "Hyaenidae")
+Hyen_stats
+```
+
+```{r}
+vect_hyen <- Hyen_stats$n
+```
+
+```{r}
+ACE(vect_hyen, taxa.row = TRUE)
+```
+
+Now we will take a look at incidence stats for the data set. This too will return a value for species richness. This, coupled with the ACE results, may help give a more complete picture ofthe potential diversity and species richness for each of these families over time. These models together will be used to determine how well the fossil data represents the likely populations of these families.
+
+```{r}
+chao2(vect_can, taxa.row = TRUE)
+chao2(vect_fel, taxa.row = TRUE)
+chao2(vect_urs, taxa.row = TRUE)
+chao2(vect_hyen, taxa.row = TRUE)
+```
+Incidence estimates tend to be ont he higher end of estimations, whereas ACE is more conservative. These numbers are relatively close to what was returned for ACE. The only seemingly high estimate is for the Felids, which returned "52" potential genera as compared to the 46 returned by ACE, and the 40 actually represented in the data set.
+
+```{r}
+Fam_stats_matrix <- matrix(c(59, 40, 31, 22, 60, 46, 34, 22, 65, 52, 35, 23),
+                           nrow = 4, byrow = FALSE,
+                           dimnames = list(c("Canidae", "Felidae", "Ursidae", "Hyaenidae"),
+                                           c("Actual", "ACE", "Chao")))
+Fam_stats_matrix
+```
+
+The above table showcases all of the results for the species richness statistics that were performed on the data. Overall, without running additional statistics, it seems that these results indicate that the fossil record for these families during the given time periods gives a somewhat accurate reflection of the species diversity and richness.
+
+
+------------------------------------------------------------------------------------------------------------------
+######Modern Day Implications of Population Distribution and Diversity
+
+Holocene map compared to modern day distribution map
+
+```{r}
+paleodatHo <- filter(paleodatFam, Epoch == "Holocene")
+```
+
+```{r}
+ggplot()+ geom_polygon(data = world, aes(x = long, y =lat, group = group), fill = "gray", color = "black")+
+  coord_quickmap()+
+  geom_point(aes(x = lng, y = lat, color = family), data = paleodatHo, size = 2, alpha = 1)+
+  theme(legend.position="bottom")+
+  labs(title = "Map of Holocene Specimens by Family", x = "Latitude", y = "Longitude")
+```
+
+You can see based on the map above that the representation of each family in the Holocene, or modern day time period, is starkly different than previous time periods. Populations have become quite isolated, occuring only in small geographic pockets. This is represented even today when comparing this map to modern day distribution patterns of these families (these modern range maps will be included for comparison in the project presentation). Perhaps the focus for conservation should be on what factors after the extinction of the Pleistocene initially caused these families to become isolated, which is only being exaserbated by current pressures from humans. Or was it humans and climate change all along? And we are just seeing the continuation of these factors playing out on these populations?
+------------------------------------------------------------------------------------------------------------------
+######Conclusion of Project
+
+I was not able to apply all aspects of the course to this project. Working with strings and dates did not apply, and I did not feel that altering the original graphs to change their order, or manipulating the data any more using things like spread() and unite(), was going to improve the quality of my results. If I were to continue on with some more of the statistics, I would have to use the spread() function to break up some of the data, especially the lat and long data.
+
+Analyzing the data presented and using various R techniques, I was able to answer several of my questions that I initially started with:
+
+Questions:
+
+1. How does the distribution of four main Carnivoran families (Canidae, Hyaenidae, Felidae, and Ursidae) change over time?
+Based on the maps completed in Part 2 of the project, you can see how all fossil species start off in small, localized clusters before distributing more widely across continents, and in some cases, globally. This follows research conducted by Vrba and DeGusta (2004). Although their research focused mainly on African mammals (but included extant and extinct represenation from the fossil record), their conclusion appears to be supported by my data on mammals outside of Africa. There are some differences between the distribution of each family. For example, the Hyenas tend to stay more isolated in African and some parts of Europe, whereas Felids and Canids have a more global distribution, most heavily in Europe and North America for the Canids, and the Americas and Africa for Felids. Bears seem to stay in North America and Eurasia, with little to no representation in Africa. This is an interesting pattern that is still present today. Interestingly, Hyenas seem to mirror the bear population, and taking hold where bears where not. This may be coincidental, though, and more research would be needed to see if there is a deeper interdependence between these two families.
+
+
+2. Are the populations directly or inversely proportional to one another?
+I am not sure that I gathered enough evidence to answer this question based on the statistics and the graphs that were run. I have a huhnch that there is a potential relationship between these families. This question was based off a modern-day example frrom Africa, where Spotted Hyena populations are high, African Hunting dog populations will be low, and vice versa. This is due to high competition rates between these two predators. To figure this out, I think I would have to examine the species-level numbers and stats more closely, instead of genera based information.
+
+
+3. Does the geographic range change for each family individually over time and why? 
+The geographic ranges, once the populations were established, seem to stay relatively steady over time, even into the modern-day Holocene. Ursids and Canids have stronger representations in North America and Europe, whereas Hyenas are best represented in Africa, and Felids are best represented in the Americas and Africa. Over time, the ranges of all of these families decrease into smaller, more isolated pockets, especially after the mass extinction of the Pleistocene and the continued pressures that are currently being placed on these large predators. For example, Hyenas are completely extinct from Europe now, and are only found in Africa. Many of the big cats that used to exist in North America are also extinct, such as the American Lion and American Cheetah, which supports that there is an overall decline in biodiversity and geographical distribution.
+
+
+
+4. Were potential competition rates an influence in the distribution of these families?
+Unfortunately, this question was also not able to be answered. While the project and the data led to some interesting answers and questions, this is one that can't be directly answered. Too many other variables, such as climate refugia, limiting factors, and competition with other organisms not included in this study would need to be examined further in order to effectively answer this question.
+
+
+5. Is one family more represented in the fossil record than others?
+Based on the statistical ratios, Canids make up 49%, or almost half, of the specimen data that was used for this study. This may be because of a greater diversity of genera for this family, coupled with a relatively early appearance in the fossil record. This increase in diversity along with a long existence time may be why there is a larger representation of this family in the fossil record. I don't think it has much to do with preservation variables upon death, as all of the families would have been exposed to the same environmental factors. Instead, Canids were a successful family that radiated and dispersed globally, allowing their diversity and overall population numbers to be have greater magnitudes than the other families.
+
+6. Which family has the most extinct biodiversity according to the fossil record?
+Again, Canids seem to take the lead here, but followed closely by the Felidae family. The dog family has 59 different genus' represented by the data, whereas Felids have 40. The Hyenas have the lowest diversity with only 22 genus' represented, while bears have 39 specimen representations.
+
+7. Where, geographically, were there potential interactions between members of these four families?
+According to the maps, there were many regions of interactions between these families, similar to modern day distributions. Bears and Canids seem to have the most overlap, likely due to similarities in morphology and preference of environmental habitat and prey consumption. Felids also overlap with these two families, but felids also overlap with Hyenas. The hunting style and environmental preferences of most felids seem to overlap more closely with the Hyenaidae family.
+
+
+8. How can the interaction and geographic distribution of these organisms give information for today's declining biodiversity?
+The statistics that were run on the species richness and biodiversity indicate that the data set contained a close representation of what was actually existing for these families over the given time periods. Unfortunately, the species diversity has declined since the Pleistocene, with only 14 different genus' for the Canids (34 total species), 14 genera for the Felids (41 total species), five genera for the bears (only 8 species), and with only three genera for hyenas. This is a large decline in biodiversity in comparison to historical data. With numbeers continuing to decline, as many members of these families are on the IUCN watch list, the overall outlook for these families seems bleak. It is important to look at how such species-dense areas functioned in Earth's past to try to better understand the environmental pressures felt by different populations. This is one step to creating better conservation plans that can appropriately accomodate the needs of the wild animals as well as the necessities of the human populations that are coexisting with them. 
+
+
+------------------------------------------------------------------------------------------------------------------
+######Reflection
+
+Overall, I really enjoyed this project and its process. It was exciting for me to get back into a scientific mindset, setting out with some questions and determining the ways to best find those answers. Although using code to do it was an entirely new experience for me, I know see how much of an asset this approach is. Things that I did for this project took only seconds with so much of a larger data set in comparison to my thesis project, which took months (or years) to complete with only a small data set. This opens so many new opportunities and I can't wait for these techniques to start taking stronger holds in zoology, conservation biology and paleontology.
+
+In terms of the project, I definetly hit some snags. When I first tried to separate out the genus and figure out their ratios and representations, I could not get it to work. I tried to graph it using some different approaches in ggplot2, but it looks like a mess. Even after learning some of the different visualization tricks later in the semester was not going to make them worth keeping. Only after we covered the material in functions and tidyr was I able to get the results I was after. Writing the function gave me some trouble at first. I wrote out exactly what I wanted on a piece of paper and then had to trial and error it in steps to get it to work the way that I wanted. One of the other challenges was getting the map to work. I was not able to get it animated, but I was able to reproduce enough maps to show the changes in distribution to answer one of my initial questions. The hardest part, though, was the modeling. I knew in the beginning that I wanted to figure out a way to model the real diversity and population numbers based on the fossil record. I also knew I wanted to use population biology statistical methods and apply them to my populations, but I was not sure how to do that, especially in R. Luckily, some other scientists had the same idea (albeit with different species) and I was able to mimic their process using my data set. I understood their method, but understanding their code took a bit more time to wrap my head around. Instead, I decided to use a package that was recently created to run some of the statistics that I was looking for. Although I was not able to generate the graphs I was hoping for, I think I can potentially come back to this portion of the project after a more intensive statistics class.
+
+There were some surprises and some results were expected. In my past research, I knew that Canids had a large biodiversity and a global distribution over time. What I was not aware of was the silent story of the bears and cats, in that bears are more geographically isolated than I previously thought. Felids also seem to be successful only under certain conditions, especially compared to canids. I knew that Hyenas have a relatively small geographical distribution, but its interesting to see it actually graphed over time and compared to three other successful Carnivoran families. If I were to continue this project, this would be my area of focus. What is causing the hyena family to be so limited? SOme other areas of continued research would look at the impact of climate refugia on the distribution patterns of the families; looking more deeply at the population densities of the different species and determining potential interactions and statistical indicators of health and interdependence, as well as performing additional distance matrices, distance trees, and clustering relationship statistics to determine more about the interactions of these four families over time. 
+
+Overall, I was able to answer almost all of my questions that were initially set in the begininning of this project. Of course many more were generated, which is usually the case, I did enjoy exploring this data set. I still feel I need a stronger background in statistics with using R, so that I could feel more comfortble exploring the dataset in that manner. I also wish I could figure out how to animate the map so one map could show the overall change in distribution over time of my families, instead of having to split it up into multiple maps. Ultimately, though, I learned a great deal through this project and I enjoyed applying what we were learning in class to a dataset that I felt comfortable using and was geniunely interested in.
+
+
+
+
+
+
